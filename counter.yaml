@@ -1,0 +1,112 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: kuma-demo
+  labels:
+    kuma.io/sidecar-injection: enabled
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: redis
+  namespace: kuma-demo
+spec:
+  selector:
+    matchLabels:
+      app: redis
+  replicas: 1
+  template:
+    metadata:
+      annotations:
+        kuma.io/mesh: meshtwo
+      labels:
+        app: redis
+    spec:
+      containers:
+        - name: redis
+          image: "redis"
+          ports:
+            - name: tcp
+              containerPort: 6379
+          lifecycle:
+            preStop: # delay shutdown to support graceful mesh leave
+              exec:
+                command: ["/bin/sleep", "30"]
+            postStart:
+              exec:
+                command: ["/usr/local/bin/redis-cli", "set", "zone", "multidemo"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    kuma.io/mesh: meshtwo
+  name: redis
+  namespace: kuma-demo
+spec:
+  selector:
+    app: redis
+  ports:
+  - protocol: TCP
+    port: 6379
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: demo-app
+  namespace: kuma-demo
+spec:
+  selector:
+    matchLabels:
+      app: demo-app
+  replicas: 1
+  template:
+    metadata:
+      annotations:
+        kuma.io/mesh: meshtwo
+      labels:
+        app: demo-app
+    spec:
+      containers:
+        - name: demo-app
+          image: "kumahq/kuma-demo"
+          env:
+            - name: REDIS_HOST
+              value: redis.kuma-demo.svc.6379.mesh
+            - name: REDIS_PORT
+              value: "80"
+            - name: APP_VERSION
+              value: "2.0"
+            - name: APP_COLOR
+              value: "#5da36f"
+          ports:
+            - name: http
+              containerPort: 5000
+---
+apiVersion: v1
+kind: Service
+metadata:
+  annotations:
+    kuma.io/mesh: meshtwo
+  name: demo-app
+  namespace: kuma-demo
+spec:
+  selector:
+    app: demo-app
+  ports:
+  - protocol: TCP
+    appProtocol: http
+    port: 5000
+---
+apiVersion: kuma.io/v1alpha1
+kind: MeshGatewayInstance
+metadata:
+  name: edge-gateway
+  namespace: kuma-demo
+  annotations:
+    kuma.io/mesh: meshtwo
+spec:
+  replicas: 1
+  serviceType: LoadBalancer
+  tags:
+    kuma.io/service: edge-gateway

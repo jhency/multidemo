@@ -1,0 +1,75 @@
+apiVersion: kuma.io/v1alpha1
+kind: Mesh
+metadata:
+  name: meshtwo
+spec:
+  logging:
+    backends:
+    - conf:
+        path: /dev/stdout
+      format: '{ destination: %KUMA_DESTINATION_SERVICE%, destinationAddress: %UPSTREAM_LOCAL_ADDRESS%,
+        source: %KUMA_SOURCE_SERVICE%, sourceAddress: %KUMA_SOURCE_ADDRESS%, bytesReceived:
+        %BYTES_RECEIVED%, bytesSent: %BYTES_SENT%}'
+      name: stdout
+      type: file
+  metrics:
+    backends:
+    - conf:
+        path: /metrics
+        port: 5670
+        tags:
+          kuma.io/service: dataplane-metrics
+      name: prometheus-1
+      type: prometheus
+    enabledBackend: prometheus-1
+  mtls:
+    backends:
+    - name: ca-1
+      type: builtin
+    enabledBackend: ca-1
+  tracing:
+    backends:
+    - conf:
+        url: http://jaeger-collector.mesh-observability:9411/api/v2/spans
+      name: jaeger-collector
+      sampling: 100
+      type: zipkin
+    defaultBackend: jaeger-collector
+---
+apiVersion: kuma.io/v1alpha1
+kind: MeshGateway
+mesh: meshtwo
+metadata:
+  name: edge-gateway
+spec:
+  selectors:
+  - match:
+      kuma.io/service: edge-gateway
+  conf:
+    listeners:
+      - port: 80
+        protocol: HTTP
+        hostname: foo.example.com
+        tags:
+          port: http/80
+---
+apiVersion: kuma.io/v1alpha1
+kind: MeshGatewayRoute
+mesh: meshtwo
+metadata:
+  name: edge-gateway-route
+spec:
+  selectors:
+    - match:
+        kuma.io/service: edge-gateway
+        port: http/80
+  conf:
+    http:
+      rules:
+        - matches:
+            - path:
+                match: PREFIX
+                value: /
+          backends:
+            - destination:
+                kuma.io/service: demo-app_kuma-demo_svc_5000
